@@ -17,17 +17,17 @@ num_rounds = 5
 epochs = 2
 batch_size = 10
 
-optimal_data_per_client = [1000 for i in range(num_clients)] # optimal data for each client (mi*) if it were running only locally
+optimal_data_per_client = [100 for i in range(num_clients)] # optimal data for each client (mi*) if it were running only locally
 marginal_cost = 0.2 # global marginal cost of more data beyond optimal (in terms of amount of data)
-epsilon = 0.1
+epsilon = 0.08
 k_global = 2
-datasize_per_client = [1000 for i in range(num_clients)] # how much training data each client uses, note that for MNIST traindata.data.shape[0] = 60000
+datasize_per_client = [80, 100, 125, 150, 175, 200, 225, 250, 275, 300] # how much training data each client uses, note that for MNIST traindata.data.shape[0] = 60000
 
 torch.manual_seed(104513) # remove randomness for reproducibility
 
 # Flags to determine which graphs to plot
 VERBOSE = True
-PLOT_ACCURACY = False
+PLOT_ACCURACY = True
 
 class Net(nn.Module):
     def __init__(self):
@@ -166,18 +166,16 @@ if __name__ == "__main__":
         test_loss, acc = test(global_model, test_loader)
         print('average train loss %0.3g | test loss %0.3g | test acc: %0.3f' % (loss / num_clients, test_loss, acc))
 
-        #client_shaped_datasize = update_client_models(global_model, client_models, datasize_per_client, optimal_data_per_client)
-        #client_model_datasizes.append(client_shaped_datasize)
-        '''
+        client_shaped_datasize = update_client_models(global_model, client_models, datasize_per_client, optimal_data_per_client)
+        client_model_datasizes.append(client_shaped_datasize)
+
         if PLOT_ACCURACY:
-            #print(client_ideal_shaped_datasize)
-            #print(client_shaped_datasize)
+            print(client_shaped_datasize)
             client_model_accuracy = [None] * len(client_models)
             for (i,model) in enumerate(client_models):
                 loss, client_model_accuracy[i] = test(model, test_loader)
             client_model_accuracies.append(client_model_accuracy)
-        '''
-    '''
+
     if PLOT_ACCURACY:
         for (i,d) in enumerate(client_model_datasizes):
             plt.plot(datasize_per_client, d, label=f"Round {i}")
@@ -195,6 +193,6 @@ if __name__ == "__main__":
         plt.title(f"Accuracy Shaping")
         plt.legend()
         plt.show()
-    '''
+
         
 
