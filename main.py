@@ -12,16 +12,16 @@ from utils import closest_subset_target_sum
 
 # GLOBAL PARAMETERS
 # Hyperparameters
-num_clients = 10
-num_rounds = 5
-epochs = 2
+num_clients = 30
+num_rounds = 3
+epochs = 5
 batch_size = 10
 
-optimal_data_per_client = [100 for i in range(num_clients)] # optimal data for each client (mi*) if it were running only locally
-marginal_cost = 0.2 # global marginal cost of more data beyond optimal (in terms of amount of data)
-epsilon = 0.08
+optimal_data_per_client = [1000 for i in range(num_clients)] # optimal data for each client (mi*) if it were running only locally
+marginal_cost = 0.00013 # global marginal cost of more data beyond optimal (in terms of amount of data)
+epsilon = 0.000
 k_global = 2
-datasize_per_client = [80, 100, 125, 150, 175, 200, 225, 250, 275, 300] # how much training data each client uses, note that for MNIST traindata.data.shape[0] = 60000
+datasize_per_client = [x for x in range(900,1800,30)] #[900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800] # how much training data each client uses, note that for MNIST traindata.data.shape[0] = 60000
 
 torch.manual_seed(104513) # remove randomness for reproducibility
 
@@ -72,6 +72,7 @@ def update_client_models(global_model, client_models, client_contribution_sizes,
         print(f"Actual available data {total_available_data}")
     client_ideal_shaped_datasize = [None] * len(client_models)
     client_shaped_datasize = [None] * len(client_models)
+    client_ideal_returned_accuracy = [None] * len(client_models)
     for (i,model) in enumerate(client_models):
         # accuracy shaping
         if (client_contribution_sizes[i] <= optimal_data_per_client[i]):
@@ -80,11 +81,13 @@ def update_client_models(global_model, client_models, client_contribution_sizes,
                 print(f"Client {i}: contributed datasize {client_contribution_sizes[i]}, accuracy shaped training datasize (ideal) {client_contribution_sizes[i]}")
             client_shaped_datasize[i] = client_contribution_sizes[i]
             client_ideal_shaped_datasize[i] = client_contribution_sizes[i]
+            client_ideal_returned_accuracy[i]= 0
         else:
             # accuracy shaping - compute ideal size of the dataset for this client's contribution
-            ideal_returned_accuracy = 1 - 2*sqrt(k_global/optimal_data_per_client[i]) + (marginal_cost+epsilon)*(1-2*sqrt(k_global/(client_contribution_sizes[i]-optimal_data_per_client[i])))
+            ideal_returned_accuracy = 1 - 2*sqrt(k_global/optimal_data_per_client[i]) + (marginal_cost+epsilon)*(client_contribution_sizes[i]-optimal_data_per_client[i]) #*(1-2*sqrt(k_global/(client_contribution_sizes[i]-optimal_data_per_client[i])))
             ideal_returned_accuracy = min(0.999, ideal_returned_accuracy)
             ideal_training_datasize = max(client_contribution_sizes[i], 1/((((1-ideal_returned_accuracy)/2)**2)/k_global))
+            client_ideal_returned_accuracy[i] = ideal_returned_accuracy
             if VERBOSE:
                 print(f"Client {i}: contributed datasize {client_contribution_sizes[i]}, accuracy shaped training datasize (ideal) {ideal_training_datasize}")
             client_ideal_shaped_datasize[i] = ideal_training_datasize
@@ -101,7 +104,7 @@ def update_client_models(global_model, client_models, client_contribution_sizes,
                 for k in param_dict.keys():
                     param_dict[k] = torch.stack([client_models[i].state_dict()[k] for i in client_indexes], 0).mean(0)
                 model.load_state_dict(param_dict)
-    return client_shaped_datasize
+    return client_shaped_datasize, client_ideal_returned_accuracy
             
 
 def server_aggregate(global_model, client_models):
@@ -151,6 +154,7 @@ if __name__ == "__main__":
     print("Initialization complete")
     client_model_accuracies = []
     client_model_datasizes = []
+    client_ideal_returned_accuracies = []
     for r in range(num_rounds):
         print(f"Round {r}")
          
@@ -166,8 +170,9 @@ if __name__ == "__main__":
         test_loss, acc = test(global_model, test_loader)
         print('average train loss %0.3g | test loss %0.3g | test acc: %0.3f' % (loss / num_clients, test_loss, acc))
 
-        client_shaped_datasize = update_client_models(global_model, client_models, datasize_per_client, optimal_data_per_client)
+        client_shaped_datasize, client_ideal_returned_accuracy = update_client_models(global_model, client_models, datasize_per_client, optimal_data_per_client)
         client_model_datasizes.append(client_shaped_datasize)
+        client_ideal_returned_accuracies.append(client_ideal_returned_accuracy)
 
         if PLOT_ACCURACY:
             print(client_shaped_datasize)
@@ -178,7 +183,7 @@ if __name__ == "__main__":
 
     if PLOT_ACCURACY:
         for (i,d) in enumerate(client_model_datasizes):
-            plt.plot(datasize_per_client, d, label=f"Round {i}")
+            plt.plot(datasize_per_client, d, label=f"Round {i}", marker='o')
             
         plt.xlabel("Amount of data Contributed by Client")
         plt.ylabel("Amount of data used in Accuracy Shaped model")
@@ -187,7 +192,7 @@ if __name__ == "__main__":
         plt.show()
 
         for (i,a) in enumerate(client_model_accuracies):
-            plt.plot(datasize_per_client, a, label=f"Round {i}")
+            plt.plot(datasize_per_client, a, label=f"Actual Accuracy Round {i}", marker='o')
         plt.xlabel("Amount of data Contributed by Client")
         plt.ylabel("Accuracy of the returned model")
         plt.title(f"Accuracy Shaping")
