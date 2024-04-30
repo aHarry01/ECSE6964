@@ -4,16 +4,16 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 import numpy as np
-from tqdm import tqdm
 from math import sqrt
 import matplotlib.pyplot as plt
+from svfl.svfl import calculate_sv
 
 from utils import closest_subset_target_sum
 
 # GLOBAL PARAMETERS
 # Hyperparameters
-num_clients = 30
-num_rounds = 3
+num_clients = 5
+num_rounds = 1
 epochs = 5
 batch_size = 10
 
@@ -21,7 +21,7 @@ optimal_data_per_client = [1000 for i in range(num_clients)] # optimal data for 
 marginal_cost = 0.00013 # global marginal cost of more data beyond optimal (in terms of amount of data)
 epsilon = 0.000
 k_global = 2
-datasize_per_client = [x for x in range(900,1800,30)] #[900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800] # how much training data each client uses, note that for MNIST traindata.data.shape[0] = 60000
+datasize_per_client = [700, 900, 1100, 1300, 1500]#[x for x in range(900,1800,900//num_clients)][:num_clients] #[900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800] # how much training data each client uses, note that for MNIST traindata.data.shape[0] = 60000
 
 torch.manual_seed(104513) # remove randomness for reproducibility
 
@@ -53,7 +53,7 @@ class Net(nn.Module):
         return output
 
 def client_update(client_model, optimizer, train_loader, epoch=5):
-    model.train()
+    client_model.train()
     for e in range(epoch):
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.cpu(), target.cpu()
@@ -115,7 +115,7 @@ def server_aggregate(global_model, client_models):
 
 
 def test(global_model, test_loader):
-    model.eval()
+    global_model.eval()
     test_loss = 0
     correct = 0
     with torch.no_grad():
@@ -130,6 +130,31 @@ def test(global_model, test_loader):
     acc = correct / len(test_loader.dataset)
 
     return test_loss, acc
+
+# ---- Functions for use with svfl ----------------------------
+def evaluate_model(model):
+    ''' Function to compute evaluation metric (accuracy) '''
+    model.eval()
+    correct = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.cpu(), target.cpu()
+            output = model(data)
+            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+            correct += pred.eq(target.view_as(pred)).sum().item()
+    acc = correct / len(test_loader.dataset)
+    return acc
+
+def fed_avg(models):
+    ''' Function to merge the model updates into 1 model for evaluation'''
+    aggregated_model = Net().cpu()
+    model_dict = models[list(models.keys())[0]].state_dict()
+    for k in model_dict.keys():
+        model_dict[k] = torch.stack([models[i].state_dict()[k] for i in models.keys()], 0).mean(0)
+    aggregated_model.load_state_dict(model_dict)
+    return aggregated_model
+
+# ------------------------------- ----------------------------
 
 if __name__ == "__main__":
     # Creating decentralized datasets
@@ -164,6 +189,13 @@ if __name__ == "__main__":
             loss += client_update(client_models[i], opt[i], train_loader[i], epoch=epochs)
             print(i)
         print("client update complete")
+
+        # Shapley Value computation, comment out for faster testing
+        
+        client_models_dict = {k:v for (k,v)in zip(range(len(client_models)),client_models)}
+        contribution_measures = calculate_sv(client_models_dict, evaluate_model, fed_avg)
+        print(contribution_measures)
+        
         
         # server aggregate
         server_aggregate(global_model, client_models)
